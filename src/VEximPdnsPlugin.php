@@ -1,6 +1,7 @@
 <?php
 
-//namespace VEximweb\Plugin\PDNS;
+// namespace VEximweb\Plugin\PDNS;
+
 namespace VEximweb\Plugin\PDNS;
 
 use Filament\Contracts\Plugin;
@@ -32,6 +33,7 @@ class VEximPdnsPlugin implements Plugin
     {
         /** @var static $plugin */
         $plugin = filament(app(static::class)->getId());
+
         return $plugin;
     }
 }

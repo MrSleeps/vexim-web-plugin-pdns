@@ -44,7 +44,7 @@ class PowerDnsProvider implements DnsProviderPlugin
             TextInput::make('api_key')
                 ->label('API Key')->password()
                 ->required()
-                ->helperText('X-API-Key for authentication'),            
+                ->helperText('X-API-Key for authentication'),
 
             Select::make('api_version')
                 ->label('API Version')
