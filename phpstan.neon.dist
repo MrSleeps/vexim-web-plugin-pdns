@@ -1,0 +1,14 @@
+includes:
+    - ./vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 4
+    paths:
+        - src
+        - config
+        - database
+    tmpDir: build/phpstan
+    bootstrapFiles:
+        - vendor/autoload.php
+    scanDirectories:
+        - vendor/vexim/dns-core/src
