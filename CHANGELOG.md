@@ -2,6 +2,16 @@
 
 All notable changes to `vexim-pdns` will be documented in this file.
 
+## Added notifications - 2026-06-27
+
+Added persistent notifications, currently on DKIM addition to dns provider
+
+### What's Changed
+
+* Added notifications by @MrSleeps in https://github.com/MrSleeps/vexim-web-plugin-pdns/pull/4
+
+**Full Changelog**: https://github.com/MrSleeps/vexim-web-plugin-pdns/compare/v1.0.1...v1.0.2
+
 ## Updated composer.json - 2026-06-26
 
 ### What's Changed
