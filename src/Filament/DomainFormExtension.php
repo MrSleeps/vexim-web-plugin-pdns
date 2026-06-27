@@ -8,6 +8,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use VEximweb\Plugin\DnsCore\Models\DnsDomain;
 use VEximweb\Plugin\DnsCore\Models\DnsProvider;
+use Illuminate\Support\Facades\Log;
 
 class DomainFormExtension
 {
@@ -38,7 +39,7 @@ class DomainFormExtension
                         ->searchable()
                         ->nullable()
                         ->live()
-                        ->helperText('Leave blank to skip DNS management')
+                        ->helperText('Leave blank to disable DNS management')
                         ->dehydrated(true)
                         ->afterStateHydrated(function ($component, $record) {
                             $row = self::existingRow($record);
@@ -65,11 +66,30 @@ class DomainFormExtension
 
     public static function onSave(mixed $record, array $data): void
     {
+        Log::debug('DomainFormExtension::onSave called', [
+            'record_id' => $record?->domain_id,
+            'pdns_provider_id' => $data['pdns_provider_id'] ?? null,
+            'pdns_is_active' => $data['pdns_is_active'] ?? null,
+        ]);
+
         $providerId = $data['pdns_provider_id'] ?? null;
 
+        // If no provider is selected, delete the DNS domain record
         if (blank($providerId)) {
+            Log::debug('No provider selected, deleting DNS domain record', [
+                'domain_id' => $record->domain_id,
+            ]);
+            
+            DnsDomain::where('domain_id', $record->domain_id)->delete();
             return;
         }
+
+        // If a provider is selected, update or create the record
+        Log::debug('Saving DNS configuration', [
+            'domain_id' => $record->domain_id,
+            'provider_id' => $providerId,
+            'is_active' => $data['pdns_is_active'] ?? true,
+        ]);
 
         DnsDomain::updateOrCreate(
             ['domain_id' => $record->domain_id],
@@ -79,5 +99,7 @@ class DomainFormExtension
                 'is_active' => $data['pdns_is_active'] ?? true,
             ]
         );
+
+        Log::debug('DNS configuration saved successfully');
     }
 }
