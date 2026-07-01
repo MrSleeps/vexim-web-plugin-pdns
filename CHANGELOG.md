@@ -2,6 +2,14 @@
 
 All notable changes to `vexim-pdns` will be documented in this file.
 
+## Improved error handling and notifications - 2026-07-01
+
+### What's Changed
+
+* Improved error handling and error notifications by @MrSleeps in https://github.com/MrSleeps/vexim-web-plugin-pdns/pull/6
+
+**Full Changelog**: https://github.com/MrSleeps/vexim-web-plugin-pdns/compare/v1.0.3...v1.0.4
+
 ## DNS Tools plugin support - 2026-07-01
 
 ### What's Changed
