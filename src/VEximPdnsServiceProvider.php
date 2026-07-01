@@ -435,6 +435,13 @@ protected function registerEventListeners(): void
                         'name' => $event->name,
                         'error' => $e->getTraceAsString(),
                     ]);
+                    $error = $e->getMessage();
+                    \Filament\Notifications\Notification::make()
+                        ->danger()
+                        ->title('DMARC Record Generation Failed')
+                        ->body($error)
+                        ->persistent()
+                        ->send();                      
                     
                     if (class_exists(\App\Events\DnsRecordFailed::class)) {
                         Event::dispatch(new \App\Events\DnsRecordFailed(
@@ -453,16 +460,21 @@ protected function registerEventListeners(): void
         );
     }
     
-    if (class_exists(\App\Events\DmarcKeyGenerated::class)) {
-        Event::listen(
-            \App\Events\DmarcKeyGenerated::class,
-            function ($event) {
-                Log::debug('VEximPdns received DmarcKeyGenerated', [
-                    'zone' => $event->zone,
-                    'name' => $event->name,
-                    'type' => $event->type,
-                ]);
+if (class_exists(\App\Events\DmarcKeyGenerated::class)) {
+    Event::listen(
+        \App\Events\DmarcKeyGenerated::class,
+        function ($event) {
+            Log::debug('VEximPdns received DmarcKeyGenerated', [
+                'zone' => $event->zone,
+                'name' => $event->name,
+                'type' => $event->type,
+            ]);
 
+            $domain = null;
+            $dnsDomain = null;
+            $error = null;
+
+            try {
                 // Find the Domain by its domain name
                 $domain = \VEximweb\Core\Data\Models\Domain::where('domain', $event->zone)->first();
 
@@ -491,46 +503,23 @@ protected function registerEventListeners(): void
                     'is_active' => $dnsDomain->is_active,
                 ]);
 
-                // Check if the DNS domain is active
                 if (!$dnsDomain->is_active) {
-                    Log::debug('DNS domain is inactive, skipping DMARC record creation', [
-                        'zone' => $event->zone,
-                        'domain_id' => $domain->domain_id,
-                    ]);
+                    Log::debug('DNS domain is inactive, skipping DMARC record creation');
                     return;
                 }
 
-                // Load the provider relationship if not already loaded
                 if (!$dnsDomain->relationLoaded('provider')) {
-                    Log::debug('Loading provider relationship for DMARC');
                     $dnsDomain->load('provider');
                 }
 
-                // Check if the provider exists
                 if (!$dnsDomain->provider) {
                     Log::warning('DNS domain has no provider for DMARC', [
                         'zone' => $event->zone,
                         'dns_domain_id' => $dnsDomain->id,
-                        'provider_id' => $dnsDomain->provider_id,
                     ]);
-
-                    // Try to find the provider directly
-                    $provider = \VEximweb\Plugin\DnsCore\Models\DnsProvider::find($dnsDomain->provider_id);
-                    if ($provider) {
-                        Log::debug('Found provider directly for DMARC', [
-                            'provider_id' => $provider->id,
-                            'provider_type' => $provider->type,
-                        ]);
-                        $dnsDomain->setRelation('provider', $provider);
-                    } else {
-                        Log::warning('Provider not found in database for DMARC', [
-                            'provider_id' => $dnsDomain->provider_id,
-                        ]);
-                        return;
-                    }
+                    return;
                 }
 
-                // Only handle if this domain uses PowerDNS
                 if ($dnsDomain->provider->type !== 'pdns') {
                     Log::debug('Domain does not use PowerDNS for DMARC, skipping', [
                         'provider_type' => $dnsDomain->provider->type,
@@ -538,59 +527,105 @@ protected function registerEventListeners(): void
                     return;
                 }
 
-                // Create the DNS record directly
+                Log::debug('Creating PowerDNS DMARC record', [
+                    'zone' => $event->zone,
+                    'name' => $event->name,
+                    'content' => $event->content,
+                    'type' => $event->type,
+                    'ttl' => $event->ttl ?? 3600,
+                ]);
+
                 $client = new \VEximweb\Plugin\PDNS\Clients\PowerDnsClient($dnsDomain->provider, $dnsDomain);
 
-                try {
-                    $result = $client->createRecord(
-                        $event->zone,
-                        $event->name,
-                        $event->type,
-                        $event->content,
-                        $event->ttl
-                    );
-                    
-                    
-                    if (class_exists(\App\Events\DnsRecordCreated::class)) {
-                        Event::dispatch(new \App\Events\DnsRecordCreated(
-                            domain: $domain,
-                            recordType: $event->type,
-                            recordName: $event->name . '.' . $event->zone,  // Fully qualified: "_dmarc.test4.com"
-                            recordValue: $event->content,
-                            provider: $dnsDomain->provider->name ?? 'PowerDNS',
-                            message: "DMARC DNS record added to " . ($dnsDomain->provider->name ?? 'PowerDNS')
-                        ));                      
+                $result = $client->createRecord(
+                    $event->zone,
+                    $event->name,
+                    $event->type,
+                    $event->content,
+                    $event->ttl ?? 3600
+                );
 
-                        Log::debug('Dispatched DnsRecordCreated event for DMARC');
-                    }                           
+                Log::info('PowerDNS DMARC record created successfully', [
+                    'zone' => $event->zone,
+                    'name' => $event->name,
+                    'result' => $result,
+                ]);
 
-                    Log::info('PowerDNS DMARC record created via event', [
-                        'zone' => $event->zone,
-                        'name' => $event->name,
-                        'result' => $result,
-                    ]);
-                } catch (\Exception $e) {
-                    Log::error('Failed to create PowerDNS DMARC record: ' . $e->getMessage(), [
-                        'zone' => $event->zone,
-                        'name' => $event->name,
-                        'error' => $e->getTraceAsString(),
-                    ]);
-                    
-                    if (class_exists(\App\Events\DnsRecordFailed::class)) {
+                if (class_exists(\App\Events\DnsRecordCreated::class)) {
+                    Event::dispatch(new \App\Events\DnsRecordCreated(
+                        domain: $domain,
+                        recordType: $event->type,
+                        recordName: $event->name . '.' . $event->zone,
+                        recordValue: $event->content,
+                        provider: $dnsDomain->provider->name ?? 'PowerDNS'
+                    ));
+                }
+
+                // Dispatch success notification for UI
+                if (class_exists(\App\Notifications\DnsRecordCreatedNotification::class)) {
+                    try {
+                        $notification = new \App\Notifications\DnsRecordCreatedNotification(
+                            new \App\Events\DnsRecordCreated(
+                                domain: $domain,
+                                recordType: $event->type,
+                                recordName: $event->name . '.' . $event->zone,
+                                recordValue: $event->content,
+                                provider: $dnsDomain->provider->name ?? 'PowerDNS'
+                            )
+                        );
+                        \Illuminate\Support\Facades\Notification::route('database', 1)->notify($notification);
+                    } catch (\Exception $e) {
+                        Log::warning('Failed to send notification: ' . $e->getMessage());
+                    }
+                }
+
+                return true;
+
+            } catch (\Exception $e) {
+                $error = $e->getMessage();
+                
+                Log::error('PowerDNS DMARC creation failed', [
+                    'error' => $e->getMessage(),
+                    'code' => $e->getCode(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                    'zone' => $event->zone,
+                    'name' => $event->name,
+                ]);
+                
+                \Filament\Notifications\Notification::make()
+                    ->danger()
+                    ->title('DMARC Record Generation Failed')
+                    ->body($error)
+                    ->persistent()
+                    ->send();                
+
+                // Dispatch the failure event for notification
+                if (class_exists(\App\Events\DnsRecordFailed::class) && $domain) {
+                    try {
                         Event::dispatch(new \App\Events\DnsRecordFailed(
                             domain: $domain,
                             recordType: $event->type,
-                            recordName: $event->name,
-                            errorMessage: $e->getMessage(),
-                            provider: $dnsDomain->provider->name ?? 'PowerDNS',
-                            message: "DMARC DNS failed to be added to " . ($dnsDomain->provider->name ?? 'PowerDNS')
+                            recordName: $event->name . '.' . $event->zone,
+                            errorMessage: 'PowerDNS: ' . $e->getMessage(),
+                            provider: $dnsDomain->provider->name ?? 'PowerDNS'
                         ));
-
-                        Log::debug('Dispatched DnsRecordFailed event for DMARC');
-                    }                        
+                    } catch (\Exception $notifyError) {
+                        Log::warning('Failed to dispatch DnsRecordFailed event: ' . $notifyError->getMessage());
+                    }
                 }
+
+                // DO NOT re-throw - this prevents the generic Livewire error page
+                // Instead, flash the error to session for the UI to display
+                if ($domain) {
+                    session()->flash('error', 'DMARC Record Failed: ' . $e->getMessage());
+                }
+
+                // Return false to indicate failure
+                return false;
             }
-        );
-    }
+        }
+    );
+}
 }
 }
