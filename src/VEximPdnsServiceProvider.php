@@ -410,6 +410,12 @@ protected function registerEventListeners(): void
                         $event->content,
                         $event->ttl
                     );
+                    \Filament\Notifications\Notification::make()
+                        ->success()
+                        ->title('DKIM Record Generation Success')
+                        ->body("The DKIM key was added to the dns")
+                        ->persistent()
+                        ->send();                        
                     
                     if (class_exists(\App\Events\DnsRecordCreated::class)) {
                         Event::dispatch(new \App\Events\DnsRecordCreated(
@@ -438,7 +444,7 @@ protected function registerEventListeners(): void
                     $error = $e->getMessage();
                     \Filament\Notifications\Notification::make()
                         ->danger()
-                        ->title('DMARC Record Generation Failed')
+                        ->title('DKIM Record Generation Failed')
                         ->body($error)
                         ->persistent()
                         ->send();                      
@@ -550,6 +556,12 @@ if (class_exists(\App\Events\DmarcKeyGenerated::class)) {
                     'name' => $event->name,
                     'result' => $result,
                 ]);
+                    \Filament\Notifications\Notification::make()
+                        ->success()
+                        ->title('DMARC Record Generation Success')
+                        ->body('The generated DMARC record was added to the dns')
+                        ->persistent()
+                        ->send();                     
 
                 if (class_exists(\App\Events\DnsRecordCreated::class)) {
                     Event::dispatch(new \App\Events\DnsRecordCreated(
