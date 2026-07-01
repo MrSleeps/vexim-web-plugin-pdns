@@ -2,6 +2,14 @@
 
 All notable changes to `vexim-pdns` will be documented in this file.
 
+## DNS Tools plugin support - 2026-07-01
+
+### What's Changed
+
+* Added support for dns-tools plugin by @MrSleeps in https://github.com/MrSleeps/vexim-web-plugin-pdns/pull/5
+
+**Full Changelog**: https://github.com/MrSleeps/vexim-web-plugin-pdns/compare/v1.0.2...v1.0.3
+
 ## Added notifications - 2026-06-27
 
 Added persistent notifications, currently on DKIM addition to dns provider
