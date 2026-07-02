@@ -73,23 +73,30 @@ class PowerDnsClient implements DnsClient
     /**
      * Normalize record name by adding trailing dot if needed
      */
-    protected function normalizeName(string $name, string $zone): string
-    {
-        $name = trim($name);
-
-        // If it's a fully qualified domain name (ends with the zone name), add trailing dot
-        if (str_ends_with($name, rtrim($zone, '.'))) {
-            return rtrim($name, '.') . '.';
-        }
-
-        // If it doesn't have a dot at all, append zone
-        if (! str_contains($name, '.')) {
-            return $name . '.' . rtrim($zone, '.') . '.';
-        }
-
-        // Otherwise, just add trailing dot if missing
+protected function normalizeName(string $name, string $zone): string
+{
+    $name = trim($name);
+    $zone = rtrim($zone, '.');
+    
+    // If name is empty, this is a root/apex record
+    // Return just the zone with trailing dot
+    if (empty($name)) {
+        return $zone . '.';
+    }
+    
+    // If it's a fully qualified domain name (ends with the zone name)
+    if (str_ends_with($name, $zone)) {
         return rtrim($name, '.') . '.';
     }
+    
+    // If it doesn't have a dot at all, append zone
+    if (! str_contains($name, '.')) {
+        return $name . '.' . $zone . '.';
+    }
+    
+    // Otherwise, just add trailing dot if missing
+    return rtrim($name, '.') . '.';
+}
 
     /**
      * Format content based on record type

@@ -56,38 +56,5 @@ public static function components($domainRecord = null): array
             'pdns_provider_id' => $data['pdns_provider_id'] ?? null,
         ]);
 
-        // If you want to actually save/delete the DNS domain record
-        if ($record && isset($data['update_dns'])) {
-            $domainId = $record->id ?? $record->domain_id ?? null;
-            
-            if (!$domainId) {
-                Log::warning('No domain ID found for DNS save');
-                return;
-            }
-            
-            if (empty($data['update_dns'])) {
-                // Delete the DNS domain record
-                DnsDomain::where('domain_id', $domainId)->delete();
-                Log::debug('DNS domain record deleted', ['domain_id' => $domainId]);
-            } else {
-                // Check if we have a provider ID
-                $providerId = $data['pdns_provider_id'] ?? null;
-                
-                if ($providerId) {
-                    // Update or create the DNS domain record
-                    DnsDomain::updateOrCreate(
-                        ['domain_id' => $domainId],
-                        [
-                            'provider_id' => $providerId,
-                            'zone_id' => null,
-                            'is_active' => $data['pdns_is_active'] ?? true,
-                        ]
-                    );
-                    Log::debug('DNS domain record saved', ['domain_id' => $domainId]);
-                } else {
-                    Log::debug('No provider selected, skipping DNS save');
-                }
-            }
-        }
     }
 }
