@@ -2,6 +2,14 @@
 
 All notable changes to `vexim-pdns` will be documented in this file.
 
+## Added spf support - 2026-07-02
+
+### What's Changed
+
+* Numberous fixes (and spf generation support) by @MrSleeps in https://github.com/MrSleeps/vexim-web-plugin-pdns/pull/7
+
+**Full Changelog**: https://github.com/MrSleeps/vexim-web-plugin-pdns/compare/v1.0.4...v1.0.5
+
 ## Improved error handling and notifications - 2026-07-01
 
 ### What's Changed
