@@ -2,6 +2,16 @@
 
 All notable changes to `vexim-pdns` will be documented in this file.
 
+## Bump dependencies - 2026-07-04
+
+### What's Changed
+
+* Pointless change of mind by @MrSleeps in https://github.com/MrSleeps/vexim-web-plugin-pdns/pull/8
+* Bump actions/cache from 5.0.5 to 6.1.0 by @dependabot[bot] in https://github.com/MrSleeps/vexim-web-plugin-pdns/pull/9
+* Bump zizmorcore/zizmor-action from 0.5.6 to 0.5.7 by @dependabot[bot] in https://github.com/MrSleeps/vexim-web-plugin-pdns/pull/10
+
+**Full Changelog**: https://github.com/MrSleeps/vexim-web-plugin-pdns/compare/v1.0.5...v1.0.6
+
 ## Added spf support - 2026-07-02
 
 ### What's Changed
