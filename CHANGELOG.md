@@ -2,6 +2,16 @@
 
 All notable changes to `vexim-pdns` will be documented in this file.
 
+## v1.1 - 2026-07-13
+
+### What's Changed
+
+* Bump stefanzweifel/git-auto-commit-action from 7.1.0 to 7.2.0 by @dependabot[bot] in https://github.com/MrSleeps/vexim-web-plugin-pdns/pull/11
+* Removed old settings and updated readme by @MrSleeps in https://github.com/MrSleeps/vexim-web-plugin-pdns/pull/12
+* Added MTA-STS form extension by @MrSleeps in https://github.com/MrSleeps/vexim-web-plugin-pdns/pull/13
+
+**Full Changelog**: https://github.com/MrSleeps/vexim-web-plugin-pdns/compare/v1.0.6...v1.1
+
 ## Bump dependencies - 2026-07-04
 
 ### What's Changed
