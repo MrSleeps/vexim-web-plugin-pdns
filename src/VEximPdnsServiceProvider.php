@@ -89,6 +89,7 @@ class VEximPdnsServiceProvider extends PackageServiceProvider
         $this->registerDomainFormExtension();
         $this->registerDmarcFormExtension();
         $this->registerSpfFormExtension();
+        $this->registerMtaStsFormExtension();
 
         // Register DNS Provider Plugin with the Core's Discovery Service
         // This is only needed for the provider dropdown options
@@ -138,7 +139,6 @@ class VEximPdnsServiceProvider extends PackageServiceProvider
             \VEximweb\Core\Domain\Filament\Resources\Schemas\DomainForm::extend(
                 // Components callback - returns the form fields
                 function () {
-                    Log::debug('DomainForm extension components called');
                     return DomainFormExtension::components();
                 },
                 // Save hook - called when domain is saved
@@ -165,7 +165,6 @@ class VEximPdnsServiceProvider extends PackageServiceProvider
      */
     protected function registerDmarcFormExtension(): void
     {
-        Log::debug('Dmarc form starting');
 
         // Check if DomainForm exists
         if (!class_exists(\VEximweb\Plugin\DnsTools\Filament\Resources\Dmarc\Modals\GenerateDmarcForm::class)) {
@@ -177,10 +176,6 @@ class VEximPdnsServiceProvider extends PackageServiceProvider
             // Register the extension with DomainForm using its extend() method
             \VEximweb\Plugin\DnsTools\Filament\Resources\Dmarc\Modals\GenerateDmarcForm::extend(
                 function ($domain = null) {
-                    Log::debug('DmarcForm extension components called', [
-                        'domain_id' => $domain?->id,
-                        'domain' => $domain?->domain,
-                    ]);
 
                     // Pass the domain to the components method
                     return DmarcFormExtension::components($domain);
@@ -208,8 +203,6 @@ class VEximPdnsServiceProvider extends PackageServiceProvider
      */
     protected function registerSpfFormExtension(): void
     {
-        Log::debug('Spf form starting');
-
         // Check if DomainForm exists
         if (!class_exists(\VEximweb\Plugin\DnsTools\Filament\Resources\Spf\Pages\GenerateSpfPage::class)) {
             Log::debug('SpfForm not found, skipping extension registration');
@@ -220,10 +213,6 @@ class VEximPdnsServiceProvider extends PackageServiceProvider
             // Register the extension with DomainForm using its extend() method
             \VEximweb\Plugin\DnsTools\Filament\Resources\Spf\Pages\GenerateSpfPage::extend(
                 function ($domain = null) {
-                    Log::debug('Spf extension components called', [
-                        'domain_id' => $domain?->id,
-                        'domain' => $domain?->domain,
-                    ]);
 
                     // Pass the domain to the components method
                     return SpfFormExtension::components($domain);
@@ -244,6 +233,43 @@ class VEximPdnsServiceProvider extends PackageServiceProvider
             ]);
         }
     }     
+    
+    /**
+     * Register the MTA-STS Form extension directly
+     * This injects the DNS configuration fields for MTA-STS
+     */
+    protected function registerMtaStsFormExtension(): void
+    {
+        // Check if MTA-STS Form exists
+        if (!class_exists(\App\Filament\Resources\MtaStsResource\Pages\CreateMtaSts::class)) {
+            Log::debug('MTA-STS Form not found, skipping extension registration');
+            return;
+        }
+
+        try {
+            // Register the extension with MTA-STS form using its extend() method
+            \App\Filament\Resources\MtaStsResource\Pages\CreateMtaSts::extend(
+                function ($domain = null) {
+
+                    // Pass the domain to the components method
+                    return MtaStsFormExtension::components($domain);
+                },
+                // Save hook - called when MTA-STS record is saved
+                function ($record, array $data) {
+                    Log::debug('MTA-STS extension save hook called', [
+                        'record_id' => $record?->id,
+                        'domain_id' => $data['domain_id'] ?? null,
+                    ]);
+                    MtaStsFormExtension::onSave($record, $data);
+                }
+            );
+
+        } catch (\Exception $e) {
+            Log::error('Failed to register PDNS MTA-STS form extension: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+            ]);
+        }
+    }    
     
     /**
      * Register this plugin with the DNS Core's discovery service
@@ -272,11 +298,6 @@ class VEximPdnsServiceProvider extends PackageServiceProvider
                     'extension_class' => DomainFormExtension::class,
                 ]);
 
-                // IMPORTANT: We DO NOT register the form extension here anymore
-                // It's now registered directly with DomainForm::extend()
-                // This prevents duplicate form fields
-
-                Log::info('PowerDNS provider plugin registered with discovery service');
             } catch (\Exception $e) {
                 Log::error('Failed to register PowerDNS plugin: ' . $e->getMessage());
             }
@@ -344,584 +365,713 @@ class VEximPdnsServiceProvider extends PackageServiceProvider
         ];
     }
 
-protected function registerEventListeners(): void
-{
-    // Listen for DNS record needed events from dns-core
-    if (class_exists(DnsRecordRequired::class)) {
-        Event::listen(
-            DnsRecordRequired::class,
-            HandlePowerDnsRecord::class
-        );
-    }
-    
-    // Listen for DKIM generation events
-    if (class_exists(DkimKeyGenerated::class)) {
-        Event::listen(
-            DkimKeyGenerated::class,
-            function ($event) {
-                Log::debug('VEximPdns received DkimKeyGenerated', [
-                    'zone' => $event->zone,
-                    'name' => $event->name,
-                    'type' => $event->type,
-                ]);
-
-                // Find the Domain by its domain name
-                $domain = \VEximweb\Core\Data\Models\Domain::where('domain', $event->zone)->first();
-
-                if (! $domain) {
-                    Log::warning('No domain found for DKIM event', [
+    protected function registerEventListeners(): void
+    {
+        // Listen for DNS record needed events from dns-core
+        if (class_exists(DnsRecordRequired::class)) {
+            Event::listen(
+                DnsRecordRequired::class,
+                HandlePowerDnsRecord::class
+            );
+        }
+        
+        // Listen for DKIM generation events
+        if (class_exists(DkimKeyGenerated::class)) {
+            Event::listen(
+                DkimKeyGenerated::class,
+                function ($event) {
+                    Log::debug('VEximPdns received DkimKeyGenerated', [
                         'zone' => $event->zone,
-                    ]);
-                    return;
-                }
-
-                // Find the DnsDomain associated with this Domain
-                $dnsDomain = \VEximweb\Plugin\DnsCore\Models\DnsDomain::where('domain_id', (int) $domain->domain_id)->first();
-
-                if (! $dnsDomain) {
-                    Log::warning('No DNS domain found for DKIM event', [
-                        'zone' => $event->zone,
-                        'domain_id' => $domain->domain_id,
-                    ]);
-                    return;
-                }
-
-                Log::debug('Found DnsDomain', [
-                    'dns_domain_id' => $dnsDomain->id,
-                    'domain_id' => $dnsDomain->domain_id,
-                    'provider_id' => $dnsDomain->provider_id,
-                    'is_active' => $dnsDomain->is_active,
-                ]);
-
-                // Check if the DNS domain is active
-                if (!$dnsDomain->is_active) {
-                    Log::debug('DNS domain is inactive, skipping DKIM record creation', [
-                        'zone' => $event->zone,
-                        'domain_id' => $domain->domain_id,
-                    ]);
-                    return;
-                }
-
-                // Load the provider relationship if not already loaded
-                if (!$dnsDomain->relationLoaded('provider')) {
-                    Log::debug('Loading provider relationship');
-                    $dnsDomain->load('provider');
-                }
-
-                // Check if the provider exists
-                if (!$dnsDomain->provider) {
-                    Log::warning('DNS domain has no provider', [
-                        'zone' => $event->zone,
-                        'dns_domain_id' => $dnsDomain->id,
-                        'provider_id' => $dnsDomain->provider_id,
+                        'name' => $event->name,
+                        'type' => $event->type,
                     ]);
 
-                    // Try to find the provider directly
-                    $provider = \VEximweb\Plugin\DnsCore\Models\DnsProvider::find($dnsDomain->provider_id);
-                    if ($provider) {
-                        Log::debug('Found provider directly', [
-                            'provider_id' => $provider->id,
-                            'provider_type' => $provider->type,
-                        ]);
-                        $dnsDomain->setRelation('provider', $provider);
-                    } else {
-                        Log::warning('Provider not found in database', [
-                            'provider_id' => $dnsDomain->provider_id,
+                    // Find the Domain by its domain name
+                    $domain = \VEximweb\Core\Data\Models\Domain::where('domain', $event->zone)->first();
+
+                    if (! $domain) {
+                        Log::warning('No domain found for DKIM event', [
+                            'zone' => $event->zone,
                         ]);
                         return;
                     }
-                }
 
-                // Only handle if this domain uses PowerDNS
-                if ($dnsDomain->provider->type !== 'pdns') {
-                    Log::debug('Domain does not use PowerDNS, skipping', [
-                        'provider_type' => $dnsDomain->provider->type,
+                    // Find the DnsDomain associated with this Domain
+                    $dnsDomain = \VEximweb\Plugin\DnsCore\Models\DnsDomain::where('domain_id', (int) $domain->domain_id)->first();
+
+                    if (! $dnsDomain) {
+                        Log::warning('No DNS domain found for DKIM event', [
+                            'zone' => $event->zone,
+                            'domain_id' => $domain->domain_id,
+                        ]);
+                        return;
+                    }
+
+                    Log::debug('Found DnsDomain', [
+                        'dns_domain_id' => $dnsDomain->id,
+                        'domain_id' => $dnsDomain->domain_id,
+                        'provider_id' => $dnsDomain->provider_id,
+                        'is_active' => $dnsDomain->is_active,
                     ]);
-                    return;
+
+                    // Check if the DNS domain is active
+                    if (!$dnsDomain->is_active) {
+                        Log::debug('DNS domain is inactive, skipping DKIM record creation', [
+                            'zone' => $event->zone,
+                            'domain_id' => $domain->domain_id,
+                        ]);
+                        return;
+                    }
+
+                    // Load the provider relationship if not already loaded
+                    if (!$dnsDomain->relationLoaded('provider')) {
+                        Log::debug('Loading provider relationship');
+                        $dnsDomain->load('provider');
+                    }
+
+                    // Check if the provider exists
+                    if (!$dnsDomain->provider) {
+                        Log::warning('DNS domain has no provider', [
+                            'zone' => $event->zone,
+                            'dns_domain_id' => $dnsDomain->id,
+                            'provider_id' => $dnsDomain->provider_id,
+                        ]);
+
+                        // Try to find the provider directly
+                        $provider = \VEximweb\Plugin\DnsCore\Models\DnsProvider::find($dnsDomain->provider_id);
+                        if ($provider) {
+                            Log::debug('Found provider directly', [
+                                'provider_id' => $provider->id,
+                                'provider_type' => $provider->type,
+                            ]);
+                            $dnsDomain->setRelation('provider', $provider);
+                        } else {
+                            Log::warning('Provider not found in database', [
+                                'provider_id' => $dnsDomain->provider_id,
+                            ]);
+                            return;
+                        }
+                    }
+
+                    // Only handle if this domain uses PowerDNS
+                    if ($dnsDomain->provider->type !== 'pdns') {
+                        Log::debug('Domain does not use PowerDNS, skipping', [
+                            'provider_type' => $dnsDomain->provider->type,
+                        ]);
+                        return;
+                    }
+
+                    // Create the DNS record directly
+                    $client = new \VEximweb\Plugin\PDNS\Clients\PowerDnsClient($dnsDomain->provider, $dnsDomain);
+
+                    try {
+                        $result = $client->createRecord(
+                            $event->zone,
+                            $event->name,
+                            $event->type,
+                            $event->content,
+                            $event->ttl
+                        );
+                        \Filament\Notifications\Notification::make()
+                            ->success()
+                            ->title('DKIM Record Generation Success')
+                            ->body("The DKIM key was added to the dns")
+                            ->persistent()
+                            ->send();                        
+                        
+                        if (class_exists(\App\Events\DnsRecordCreated::class)) {
+                            Event::dispatch(new \App\Events\DnsRecordCreated(
+                                domain: $domain,
+                                recordType: $event->type,
+                                recordName: $event->name,
+                                recordValue: $event->content,
+                                provider: $dnsDomain->provider->name ?? 'PowerDNS',
+                                message: "DKIM DNS record added to " . ($dnsDomain->provider->name ?? 'PowerDNS')
+                            ));
+
+                            Log::debug('Dispatched DnsRecordCreated event');
+                        }                           
+
+                        Log::info('PowerDNS record created via event', [
+                            'zone' => $event->zone,
+                            'name' => $event->name,
+                            'result' => $result,
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('Failed to create PowerDNS record: ' . $e->getMessage(), [
+                            'zone' => $event->zone,
+                            'name' => $event->name,
+                            'error' => $e->getTraceAsString(),
+                        ]);
+                        $error = $e->getMessage();
+                        \Filament\Notifications\Notification::make()
+                            ->danger()
+                            ->title('DKIM Record Generation Failed')
+                            ->body($error)
+                            ->persistent()
+                            ->send();                      
+                        
+                        if (class_exists(\App\Events\DnsRecordFailed::class)) {
+                            Event::dispatch(new \App\Events\DnsRecordFailed(
+                                domain: $domain,
+                                recordType: $event->type,
+                                recordName: $event->name,
+                                errorMessage: $e->getMessage(),
+                                provider: $dnsDomain->provider->name ?? 'PowerDNS',
+                                message: "DKIM DNS failed to be added to " . ($dnsDomain->provider->name ?? 'PowerDNS')
+                            ));
+
+                            Log::debug('Dispatched DnsRecordFailed event');
+                        }                        
+                    }
                 }
-
-                // Create the DNS record directly
-                $client = new \VEximweb\Plugin\PDNS\Clients\PowerDnsClient($dnsDomain->provider, $dnsDomain);
-
-                try {
-                    $result = $client->createRecord(
-                        $event->zone,
-                        $event->name,
-                        $event->type,
-                        $event->content,
-                        $event->ttl
-                    );
-                    \Filament\Notifications\Notification::make()
-                        ->success()
-                        ->title('DKIM Record Generation Success')
-                        ->body("The DKIM key was added to the dns")
-                        ->persistent()
-                        ->send();                        
-                    
-                    if (class_exists(\App\Events\DnsRecordCreated::class)) {
-                        Event::dispatch(new \App\Events\DnsRecordCreated(
-                            domain: $domain,
-                            recordType: $event->type,
-                            recordName: $event->name,
-                            recordValue: $event->content,
-                            provider: $dnsDomain->provider->name ?? 'PowerDNS',
-                            message: "DKIM DNS record added to " . ($dnsDomain->provider->name ?? 'PowerDNS')
-                        ));
-
-                        Log::debug('Dispatched DnsRecordCreated event');
-                    }                           
-
-                    Log::info('PowerDNS record created via event', [
+            );
+        }
+        
+        if (class_exists(\App\Events\DmarcKeyGenerated::class)) {
+            Event::listen(
+                \App\Events\DmarcKeyGenerated::class,
+                function ($event) {
+                    Log::debug('VEximPdns received DmarcKeyGenerated', [
                         'zone' => $event->zone,
                         'name' => $event->name,
-                        'result' => $result,
+                        'type' => $event->type,
                     ]);
-                } catch (\Exception $e) {
-                    Log::error('Failed to create PowerDNS record: ' . $e->getMessage(), [
+
+                    $domain = null;
+                    $dnsDomain = null;
+                    $error = null;
+
+                    try {
+                        // Find the Domain by its domain name
+                        $domain = \VEximweb\Core\Data\Models\Domain::where('domain', $event->zone)->first();
+
+                        if (! $domain) {
+                            Log::warning('No domain found for DMARC event', [
+                                'zone' => $event->zone,
+                            ]);
+                            return;
+                        }
+
+                        // Find the DnsDomain associated with this Domain
+                        $dnsDomain = \VEximweb\Plugin\DnsCore\Models\DnsDomain::where('domain_id', (int) $domain->domain_id)->first();
+
+                        if (! $dnsDomain) {
+                            Log::warning('No DNS domain found for DMARC event', [
+                                'zone' => $event->zone,
+                                'domain_id' => $domain->domain_id,
+                            ]);
+                            return;
+                        }
+
+                        Log::debug('Found DnsDomain for DMARC', [
+                            'dns_domain_id' => $dnsDomain->id,
+                            'domain_id' => $dnsDomain->domain_id,
+                            'provider_id' => $dnsDomain->provider_id,
+                            'is_active' => $dnsDomain->is_active,
+                        ]);
+
+                        if (!$dnsDomain->is_active) {
+                            Log::debug('DNS domain is inactive, skipping DMARC record creation');
+                            return;
+                        }
+
+                        if (!$dnsDomain->relationLoaded('provider')) {
+                            $dnsDomain->load('provider');
+                        }
+
+                        if (!$dnsDomain->provider) {
+                            Log::warning('DNS domain has no provider for DMARC', [
+                                'zone' => $event->zone,
+                                'dns_domain_id' => $dnsDomain->id,
+                            ]);
+                            return;
+                        }
+
+                        if ($dnsDomain->provider->type !== 'pdns') {
+                            Log::debug('Domain does not use PowerDNS for DMARC, skipping', [
+                                'provider_type' => $dnsDomain->provider->type,
+                            ]);
+                            return;
+                        }
+
+                        // Fix: Handle empty name properly for root/apex records
+                        $recordName = empty($event->name) ? '' : $event->name;
+                        $fullRecordName = empty($event->name) 
+                            ? $event->zone  // For root records, just use the zone
+                            : $event->name . '.' . $event->zone;
+
+                        Log::debug('Creating PowerDNS DMARC record', [
+                            'zone' => $event->zone,
+                            'name' => $recordName,
+                            'full_record_name' => $fullRecordName,
+                            'content' => $event->content,
+                            'type' => $event->type,
+                            'ttl' => $event->ttl ?? 3600,
+                        ]);
+
+                        $client = new \VEximweb\Plugin\PDNS\Clients\PowerDnsClient($dnsDomain->provider, $dnsDomain);
+
+                        $result = $client->createRecord(
+                            $event->zone,
+                            $recordName,  // Pass empty string for root records
+                            $event->type,
+                            $event->content,
+                            $event->ttl ?? 3600
+                        );
+
+                        Log::info('PowerDNS DMARC record created successfully', [
+                            'zone' => $event->zone,
+                            'name' => $recordName,
+                            'result' => $result,
+                        ]);
+
+                        // Send Filament notification
+                        \Filament\Notifications\Notification::make()
+                            ->success()
+                            ->title('DMARC Record Generation Success')
+                            ->body('The generated DMARC record was added to the DNS')
+                            ->persistent()
+                            ->send();
+
+                        // Build the provider name and message
+                        $providerName = $dnsDomain->provider->name ?? 'PowerDNS';
+                        $message = "DMARC DNS record was added to {$providerName}";
+
+                        // ONLY dispatch the event - let the event handler handle notifications
+                        if (class_exists(\App\Events\DnsRecordCreated::class)) {
+                            try {
+                                Event::dispatch(new \App\Events\DnsRecordCreated(
+                                    domain: $domain,
+                                    recordType: $event->type,
+                                    recordName: $fullRecordName,
+                                    recordValue: $event->content,
+                                    provider: $providerName,
+                                    message: $message
+                                ));
+
+                                Log::debug('Dispatched DnsRecordCreated event for DMARC');
+                            } catch (\Exception $e) {
+                                Log::warning('Failed to dispatch DnsRecordCreated event: ' . $e->getMessage());
+                            }
+                        }
+
+                        return true;
+
+                    } catch (\Exception $e) {
+                        $error = $e->getMessage();
+                        
+                        Log::error('PowerDNS DMARC creation failed', [
+                            'error' => $e->getMessage(),
+                            'code' => $e->getCode(),
+                            'file' => $e->getFile(),
+                            'line' => $e->getLine(),
+                            'zone' => $event->zone,
+                            'name' => $event->name,
+                        ]);
+                        
+                        // Send Filament error notification
+                        \Filament\Notifications\Notification::make()
+                            ->danger()
+                            ->title('DMARC Record Generation Failed')
+                            ->body($error)
+                            ->persistent()
+                            ->send();
+
+                        // Dispatch the failure event for notification
+                        if (class_exists(\App\Events\DnsRecordFailed::class) && $domain) {
+                            try {
+                                $recordName = empty($event->name) 
+                                    ? $event->zone 
+                                    : $event->name . '.' . $event->zone;
+                                    
+                                Event::dispatch(new \App\Events\DnsRecordFailed(
+                                    domain: $domain,
+                                    recordType: $event->type,
+                                    recordName: $recordName,
+                                    errorMessage: 'PowerDNS: ' . $e->getMessage(),
+                                    provider: $dnsDomain->provider->name ?? 'PowerDNS'
+                                ));
+                            } catch (\Exception $notifyError) {
+                                Log::warning('Failed to dispatch DnsRecordFailed event: ' . $notifyError->getMessage());
+                            }
+                        }
+
+                        // DO NOT re-throw - this prevents the generic Livewire error page
+                        // Instead, flash the error to session for the UI to display
+                        if ($domain) {
+                            session()->flash('error', 'DMARC Record Failed: ' . $e->getMessage());
+                        }
+
+                        // Return false to indicate failure
+                        return false;
+                    }
+                }
+            );
+        }
+        
+        if (class_exists(\App\Events\SpfRecordGenerated::class)) {
+            Event::listen(
+                \App\Events\SpfRecordGenerated::class,
+                function ($event) {
+                    Log::debug('VEximPdns received SpfRecordGenerated', [
                         'zone' => $event->zone,
                         'name' => $event->name,
-                        'error' => $e->getTraceAsString(),
+                        'type' => $event->type,
                     ]);
-                    $error = $e->getMessage();
-                    \Filament\Notifications\Notification::make()
-                        ->danger()
-                        ->title('DKIM Record Generation Failed')
-                        ->body($error)
-                        ->persistent()
-                        ->send();                      
-                    
-                    if (class_exists(\App\Events\DnsRecordFailed::class)) {
-                        Event::dispatch(new \App\Events\DnsRecordFailed(
-                            domain: $domain,
-                            recordType: $event->type,
-                            recordName: $event->name,
-                            errorMessage: $e->getMessage(),
-                            provider: $dnsDomain->provider->name ?? 'PowerDNS',
-                            message: "DKIM DNS failed to be added to " . ($dnsDomain->provider->name ?? 'PowerDNS')
-                        ));
 
-                        Log::debug('Dispatched DnsRecordFailed event');
-                    }                        
+                    $domain = null;
+                    $dnsDomain = null;
+                    $error = null;
+
+                    try {
+                        // Find the Domain by its domain name
+                        $domain = \VEximweb\Core\Data\Models\Domain::where('domain', $event->zone)->first();
+
+                        if (! $domain) {
+                            Log::warning('No domain found for SPF event', [
+                                'zone' => $event->zone,
+                            ]);
+                            return;
+                        }
+
+                        // Find the DnsDomain associated with this Domain
+                        $dnsDomain = \VEximweb\Plugin\DnsCore\Models\DnsDomain::where('domain_id', (int) $domain->domain_id)->first();
+
+                        if (! $dnsDomain) {
+                            Log::warning('No DNS domain found for SPF event', [
+                                'zone' => $event->zone,
+                                'domain_id' => $domain->domain_id,
+                            ]);
+                            return;
+                        }
+
+                        Log::debug('Found DnsDomain for SPF', [
+                            'dns_domain_id' => $dnsDomain->id,
+                            'domain_id' => $dnsDomain->domain_id,
+                            'provider_id' => $dnsDomain->provider_id,
+                            'is_active' => $dnsDomain->is_active,
+                        ]);
+
+                        if (!$dnsDomain->is_active) {
+                            Log::debug('DNS domain is inactive, skipping SPF record creation');
+                            return;
+                        }
+
+                        if (!$dnsDomain->relationLoaded('provider')) {
+                            $dnsDomain->load('provider');
+                        }
+
+                        if (!$dnsDomain->provider) {
+                            Log::warning('DNS domain has no provider for SPF', [
+                                'zone' => $event->zone,
+                                'dns_domain_id' => $dnsDomain->id,
+                            ]);
+                            return;
+                        }
+
+                        if ($dnsDomain->provider->type !== 'pdns') {
+                            Log::debug('Domain does not use PowerDNS for SPF, skipping', [
+                                'provider_type' => $dnsDomain->provider->type,
+                            ]);
+                            return;
+                        }
+
+                        // Fix: Handle empty name properly for root/apex records
+                        $recordName = empty($event->name) ? '' : $event->name;
+                        $fullRecordName = empty($event->name) 
+                            ? $event->zone  // For root records, just use the zone
+                            : $event->name . '.' . $event->zone;
+
+                        Log::debug('Creating PowerDNS SPF record', [
+                            'zone' => $event->zone,
+                            'name' => $recordName,
+                            'full_record_name' => $fullRecordName,
+                            'content' => $event->content,
+                            'type' => $event->type,
+                            'ttl' => $event->ttl ?? 3600,
+                        ]);
+
+                        $client = new \VEximweb\Plugin\PDNS\Clients\PowerDnsClient($dnsDomain->provider, $dnsDomain);
+
+                        $result = $client->createRecord(
+                            $event->zone,
+                            $recordName,  // Pass empty string for root records
+                            $event->type,
+                            $event->content,
+                            $event->ttl ?? 3600
+                        );
+
+                        Log::info('PowerDNS SPF record created successfully', [
+                            'zone' => $event->zone,
+                            'name' => $recordName,
+                            'result' => $result,
+                        ]);
+
+                        // Send Filament notification
+                        \Filament\Notifications\Notification::make()
+                            ->success()
+                            ->title('SPF DNS Record Generation Success')
+                            ->body('The generated SPF record was added to the DNS')
+                            ->persistent()
+                            ->send();
+
+                        // Build the provider name and message
+                        $providerName = $dnsDomain->provider->name ?? 'PowerDNS';
+                        $message = "SPF record was added to {$providerName}";
+
+                        // ONLY dispatch the event - let the event handler handle notifications
+                        if (class_exists(\App\Events\DnsRecordCreated::class)) {
+                            try {
+                                Event::dispatch(new \App\Events\DnsRecordCreated(
+                                    domain: $domain,
+                                    recordType: $event->type,
+                                    recordName: $fullRecordName,
+                                    recordValue: $event->content,
+                                    provider: $providerName,
+                                    message: $message
+                                ));
+
+                                Log::debug('Dispatched DnsRecordCreated event for SPF');
+                            } catch (\Exception $e) {
+                                Log::warning('Failed to dispatch DnsRecordCreated event: ' . $e->getMessage());
+                            }
+                        }
+
+                        return true;
+
+                    } catch (\Exception $e) {
+                        $error = $e->getMessage();
+                        
+                        Log::error('PowerDNS SPF creation failed', [
+                            'error' => $e->getMessage(),
+                            'code' => $e->getCode(),
+                            'file' => $e->getFile(),
+                            'line' => $e->getLine(),
+                            'zone' => $event->zone,
+                            'name' => $event->name,
+                        ]);
+                        
+                        // Send Filament error notification
+                        \Filament\Notifications\Notification::make()
+                            ->danger()
+                            ->title('SPF Record Generation Failed')
+                            ->body($error)
+                            ->persistent()
+                            ->send();
+
+                        // Dispatch the failure event for notification
+                        if (class_exists(\App\Events\DnsRecordFailed::class) && $domain) {
+                            try {
+                                $recordName = empty($event->name) 
+                                    ? $event->zone 
+                                    : $event->name . '.' . $event->zone;
+                                    
+                                Event::dispatch(new \App\Events\DnsRecordFailed(
+                                    domain: $domain,
+                                    recordType: $event->type,
+                                    recordName: $recordName,
+                                    errorMessage: 'PowerDNS: ' . $e->getMessage(),
+                                    provider: $dnsDomain->provider->name ?? 'PowerDNS'
+                                ));
+                            } catch (\Exception $notifyError) {
+                                Log::warning('Failed to dispatch DnsRecordFailed event: ' . $notifyError->getMessage());
+                            }
+                        }
+
+                        // DO NOT re-throw - this prevents the generic Livewire error page
+                        // Instead, flash the error to session for the UI to display
+                        if ($domain) {
+                            session()->flash('error', 'SPF Record Failed: ' . $e->getMessage());
+                        }
+
+                        // Return false to indicate failure
+                        return false;
+                    }
                 }
-            }
-        );
+            );
+        } 
+        
+        if (class_exists(\App\Events\MtaStsRecordGenerated::class)) {
+            Event::listen(
+                \App\Events\MtaStsRecordGenerated::class,
+                function ($event) {
+                    Log::debug('VEximPdns received MtaStsRecordGenerated', [
+                        'zone' => $event->zone,
+                        'name' => $event->name,
+                        'type' => $event->type,
+                    ]);
+
+                    $domain = null;
+                    $dnsDomain = null;
+                    $error = null;
+
+                    try {
+                        // Find the Domain by its domain name
+                        $domain = \VEximweb\Core\Data\Models\Domain::where('domain', $event->zone)->first();
+
+                        if (! $domain) {
+                            Log::warning('No domain found for MTA-STS event', [
+                                'zone' => $event->zone,
+                            ]);
+                            return;
+                        }
+
+                        // Find the DnsDomain associated with this Domain
+                        $dnsDomain = \VEximweb\Plugin\DnsCore\Models\DnsDomain::where('domain_id', (int) $domain->domain_id)->first();
+
+                        if (! $dnsDomain) {
+                            Log::warning('No DNS domain found for MTA-STS event', [
+                                'zone' => $event->zone,
+                                'domain_id' => $domain->domain_id,
+                            ]);
+                            return;
+                        }
+
+                        Log::debug('Found DnsDomain for MTA-STS', [
+                            'dns_domain_id' => $dnsDomain->id,
+                            'domain_id' => $dnsDomain->domain_id,
+                            'provider_id' => $dnsDomain->provider_id,
+                            'is_active' => $dnsDomain->is_active,
+                        ]);
+
+                        if (!$dnsDomain->is_active) {
+                            Log::debug('DNS domain is inactive, skipping MTA-STS record creation');
+                            return;
+                        }
+
+                        if (!$dnsDomain->relationLoaded('provider')) {
+                            $dnsDomain->load('provider');
+                        }
+
+                        if (!$dnsDomain->provider) {
+                            Log::warning('DNS domain has no provider for MTA-STS', [
+                                'zone' => $event->zone,
+                                'dns_domain_id' => $dnsDomain->id,
+                            ]);
+                            return;
+                        }
+
+                        if ($dnsDomain->provider->type !== 'pdns') {
+                            Log::debug('Domain does not use PowerDNS for MTA-STS, skipping', [
+                                'provider_type' => $dnsDomain->provider->type,
+                            ]);
+                            return;
+                        }
+
+                        // Fix: Handle empty name properly for root/apex records
+                        $recordName = empty($event->name) ? '' : $event->name;
+                        $fullRecordName = empty($event->name) 
+                            ? $event->zone  // For root records, just use the zone
+                            : $event->name . '.' . $event->zone;
+
+                        Log::debug('Creating PowerDNS MTA-STS record', [
+                            'zone' => $event->zone,
+                            'name' => $recordName,
+                            'full_record_name' => $fullRecordName,
+                            'content' => $event->content,
+                            'type' => $event->type,
+                            'ttl' => $event->ttl ?? 3600,
+                        ]);
+
+                        $client = new \VEximweb\Plugin\PDNS\Clients\PowerDnsClient($dnsDomain->provider, $dnsDomain);
+
+                        $result = $client->createRecord(
+                            $event->zone,
+                            $recordName,  // Pass empty string for root records
+                            $event->type,
+                            $event->content,
+                            $event->ttl ?? 3600
+                        );
+
+                        Log::info('PowerDNS MTA-STS record created successfully', [
+                            'zone' => $event->zone,
+                            'name' => $recordName,
+                            'result' => $result,
+                        ]);
+
+                        // Send Filament notification
+                        \Filament\Notifications\Notification::make()
+                            ->success()
+                            ->title('MTA-STS DNS Record Generation Success')
+                            ->body('The generated MTA-STS record was added to the DNS')
+                            ->persistent()
+                            ->send();
+
+                        // Build the provider name and message
+                        $providerName = $dnsDomain->provider->name ?? 'PowerDNS';
+                        $message = "MTA-STS record was added to {$providerName}";
+
+                        // ONLY dispatch the event - let the event handler handle notifications
+                        if (class_exists(\App\Events\DnsRecordCreated::class)) {
+                            try {
+                                Event::dispatch(new \App\Events\DnsRecordCreated(
+                                    domain: $domain,
+                                    recordType: $event->type,
+                                    recordName: $fullRecordName,
+                                    recordValue: $event->content,
+                                    provider: $providerName,
+                                    message: $message
+                                ));
+
+                                Log::debug('Dispatched DnsRecordCreated event for MTA-STS');
+                            } catch (\Exception $e) {
+                                Log::warning('Failed to dispatch DnsRecordCreated event: ' . $e->getMessage());
+                            }
+                        }
+
+                        return true;
+
+                    } catch (\Exception $e) {
+                        $error = $e->getMessage();
+                        
+                        Log::error('PowerDNS MTA-STS creation failed', [
+                            'error' => $e->getMessage(),
+                            'code' => $e->getCode(),
+                            'file' => $e->getFile(),
+                            'line' => $e->getLine(),
+                            'zone' => $event->zone,
+                            'name' => $event->name,
+                        ]);
+                        
+                        // Send Filament error notification
+                        \Filament\Notifications\Notification::make()
+                            ->danger()
+                            ->title('MTA-STS Record Generation Failed')
+                            ->body($error)
+                            ->persistent()
+                            ->send();
+
+                        // Dispatch the failure event for notification
+                        if (class_exists(\App\Events\DnsRecordFailed::class) && $domain) {
+                            try {
+                                $recordName = empty($event->name) 
+                                    ? $event->zone 
+                                    : $event->name . '.' . $event->zone;
+                                    
+                                Event::dispatch(new \App\Events\DnsRecordFailed(
+                                    domain: $domain,
+                                    recordType: $event->type,
+                                    recordName: $recordName,
+                                    errorMessage: 'PowerDNS: ' . $e->getMessage(),
+                                    provider: $dnsDomain->provider->name ?? 'PowerDNS'
+                                ));
+                            } catch (\Exception $notifyError) {
+                                Log::warning('Failed to dispatch DnsRecordFailed event: ' . $notifyError->getMessage());
+                            }
+                        }
+
+                        // DO NOT re-throw - this prevents the generic Livewire error page
+                        // Instead, flash the error to session for the UI to display
+                        if ($domain) {
+                            session()->flash('error', 'MTA-STS Record Failed: ' . $e->getMessage());
+                        }
+
+                        // Return false to indicate failure
+                        return false;
+                    }
+                }
+            );
+        }     
     }
-    
-if (class_exists(\App\Events\DmarcKeyGenerated::class)) {
-    Event::listen(
-        \App\Events\DmarcKeyGenerated::class,
-        function ($event) {
-            Log::debug('VEximPdns received DmarcKeyGenerated', [
-                'zone' => $event->zone,
-                'name' => $event->name,
-                'type' => $event->type,
-            ]);
-
-            $domain = null;
-            $dnsDomain = null;
-            $error = null;
-
-            try {
-                // Find the Domain by its domain name
-                $domain = \VEximweb\Core\Data\Models\Domain::where('domain', $event->zone)->first();
-
-                if (! $domain) {
-                    Log::warning('No domain found for DMARC event', [
-                        'zone' => $event->zone,
-                    ]);
-                    return;
-                }
-
-                // Find the DnsDomain associated with this Domain
-                $dnsDomain = \VEximweb\Plugin\DnsCore\Models\DnsDomain::where('domain_id', (int) $domain->domain_id)->first();
-
-                if (! $dnsDomain) {
-                    Log::warning('No DNS domain found for DMARC event', [
-                        'zone' => $event->zone,
-                        'domain_id' => $domain->domain_id,
-                    ]);
-                    return;
-                }
-
-                Log::debug('Found DnsDomain for DMARC', [
-                    'dns_domain_id' => $dnsDomain->id,
-                    'domain_id' => $dnsDomain->domain_id,
-                    'provider_id' => $dnsDomain->provider_id,
-                    'is_active' => $dnsDomain->is_active,
-                ]);
-
-                if (!$dnsDomain->is_active) {
-                    Log::debug('DNS domain is inactive, skipping DMARC record creation');
-                    return;
-                }
-
-                if (!$dnsDomain->relationLoaded('provider')) {
-                    $dnsDomain->load('provider');
-                }
-
-                if (!$dnsDomain->provider) {
-                    Log::warning('DNS domain has no provider for DMARC', [
-                        'zone' => $event->zone,
-                        'dns_domain_id' => $dnsDomain->id,
-                    ]);
-                    return;
-                }
-
-                if ($dnsDomain->provider->type !== 'pdns') {
-                    Log::debug('Domain does not use PowerDNS for DMARC, skipping', [
-                        'provider_type' => $dnsDomain->provider->type,
-                    ]);
-                    return;
-                }
-
-                // Fix: Handle empty name properly for root/apex records
-                $recordName = empty($event->name) ? '' : $event->name;
-                $fullRecordName = empty($event->name) 
-                    ? $event->zone  // For root records, just use the zone
-                    : $event->name . '.' . $event->zone;
-
-                Log::debug('Creating PowerDNS DMARC record', [
-                    'zone' => $event->zone,
-                    'name' => $recordName,
-                    'full_record_name' => $fullRecordName,
-                    'content' => $event->content,
-                    'type' => $event->type,
-                    'ttl' => $event->ttl ?? 3600,
-                ]);
-
-                $client = new \VEximweb\Plugin\PDNS\Clients\PowerDnsClient($dnsDomain->provider, $dnsDomain);
-
-                $result = $client->createRecord(
-                    $event->zone,
-                    $recordName,  // Pass empty string for root records
-                    $event->type,
-                    $event->content,
-                    $event->ttl ?? 3600
-                );
-
-                Log::info('PowerDNS DMARC record created successfully', [
-                    'zone' => $event->zone,
-                    'name' => $recordName,
-                    'result' => $result,
-                ]);
-
-                // Send Filament notification
-                \Filament\Notifications\Notification::make()
-                    ->success()
-
-                    ->title('DMARC Record Generation Success')
-                    ->body('The generated DMARC record was added to the DNS')
-                    ->persistent()
-                    ->send();
-
-                // Build the provider name and message
-                $providerName = $dnsDomain->provider->name ?? 'PowerDNS';
-                $message = "DMARC DNS record was added to {$providerName}";
-                $title = "DMARC Record Added";
-
-                // Dispatch DnsRecordCreated event with explicit message
-                if (class_exists(\App\Events\DnsRecordCreated::class)) {
-                    try {
-                        Event::dispatch(new \App\Events\DnsRecordCreated(
-                            domain: $domain,
-                            recordType: $event->type,
-                            recordName: $fullRecordName,
-                            recordValue: $event->content,
-                            provider: $providerName,
-                            message: $message
-                        ));
-                    } catch (\Exception $e) {
-                        Log::warning('Failed to dispatch DnsRecordCreated event: ' . $e->getMessage());
-                    }
-                }
-
-                // Dispatch notification for UI
-                if (class_exists(\App\Notifications\DnsRecordCreatedNotification::class)) {
-                    try {
-                        // Create the event with explicit message
-                        $dnsEvent = new \App\Events\DnsRecordCreated(
-                            domain: $domain,
-                            recordType: $event->type,
-                            recordName: $fullRecordName,
-                            recordValue: $event->content,
-                            provider: $providerName,
-                            message: $message
-                        );
-                        
-                        // Create the notification with the event
-                        $notification = new \App\Notifications\DnsRecordCreatedNotification($dnsEvent);
-                        
-                        \Illuminate\Support\Facades\Notification::route('database', 1)->notify($notification);
-                        
-                        Log::debug('DMARC notification sent successfully', [
-                            'message' => $message,
-                            'record_name' => $fullRecordName,
-                        ]);
-                    } catch (\Exception $e) {
-                        Log::warning('Failed to send DMARC notification: ' . $e->getMessage());
-                    }
-                }
-
-                return true;
-
-            } catch (\Exception $e) {
-                $error = $e->getMessage();
-                
-                Log::error('PowerDNS DMARC creation failed', [
-                    'error' => $e->getMessage(),
-                    'code' => $e->getCode(),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
-                    'zone' => $event->zone,
-                    'name' => $event->name,
-                ]);
-                
-                // Send Filament error notification
-                \Filament\Notifications\Notification::make()
-                    ->danger()
-                    ->title('DMARC Record Generation Failed')
-                    ->body($error)
-                    ->persistent()
-                    ->send();
-
-                // Dispatch the failure event for notification
-                if (class_exists(\App\Events\DnsRecordFailed::class) && $domain) {
-                    try {
-                        $recordName = empty($event->name) 
-                            ? $event->zone 
-                            : $event->name . '.' . $event->zone;
-                            
-                        Event::dispatch(new \App\Events\DnsRecordFailed(
-                            domain: $domain,
-                            recordType: $event->type,
-                            recordName: $recordName,
-                            errorMessage: 'PowerDNS: ' . $e->getMessage(),
-                            provider: $dnsDomain->provider->name ?? 'PowerDNS'
-                        ));
-                    } catch (\Exception $notifyError) {
-                        Log::warning('Failed to dispatch DnsRecordFailed event: ' . $notifyError->getMessage());
-                    }
-                }
-
-                // DO NOT re-throw - this prevents the generic Livewire error page
-                // Instead, flash the error to session for the UI to display
-                if ($domain) {
-                    session()->flash('error', 'DMARC Record Failed: ' . $e->getMessage());
-                }
-
-                // Return false to indicate failure
-                return false;
-            }
-        }
-    );
-}
-    
-if (class_exists(\App\Events\SpfRecordGenerated::class)) {
-    Event::listen(
-        \App\Events\SpfRecordGenerated::class,
-        function ($event) {
-            Log::debug('VEximPdns received SpfRecordGenerated', [
-                'zone' => $event->zone,
-                'name' => $event->name,
-                'type' => $event->type,
-            ]);
-
-            $domain = null;
-            $dnsDomain = null;
-            $error = null;
-
-            try {
-                // Find the Domain by its domain name
-                $domain = \VEximweb\Core\Data\Models\Domain::where('domain', $event->zone)->first();
-
-                if (! $domain) {
-                    Log::warning('No domain found for SPF event', [
-                        'zone' => $event->zone,
-                    ]);
-                    return;
-                }
-
-                // Find the DnsDomain associated with this Domain
-                $dnsDomain = \VEximweb\Plugin\DnsCore\Models\DnsDomain::where('domain_id', (int) $domain->domain_id)->first();
-
-                if (! $dnsDomain) {
-                    Log::warning('No DNS domain found for SPF event', [
-                        'zone' => $event->zone,
-                        'domain_id' => $domain->domain_id,
-                    ]);
-                    return;
-                }
-
-                Log::debug('Found DnsDomain for SPF', [
-                    'dns_domain_id' => $dnsDomain->id,
-                    'domain_id' => $dnsDomain->domain_id,
-                    'provider_id' => $dnsDomain->provider_id,
-                    'is_active' => $dnsDomain->is_active,
-                ]);
-
-                if (!$dnsDomain->is_active) {
-                    Log::debug('DNS domain is inactive, skipping SPF record creation');
-                    return;
-                }
-
-                if (!$dnsDomain->relationLoaded('provider')) {
-                    $dnsDomain->load('provider');
-                }
-
-                if (!$dnsDomain->provider) {
-                    Log::warning('DNS domain has no provider for SPF', [
-                        'zone' => $event->zone,
-                        'dns_domain_id' => $dnsDomain->id,
-                    ]);
-                    return;
-                }
-
-                if ($dnsDomain->provider->type !== 'pdns') {
-                    Log::debug('Domain does not use PowerDNS for SPF, skipping', [
-                        'provider_type' => $dnsDomain->provider->type,
-                    ]);
-                    return;
-                }
-
-                // Fix: Handle empty name properly for root/apex records
-                $recordName = empty($event->name) ? '' : $event->name;
-                $fullRecordName = empty($event->name) 
-                    ? $event->zone  // For root records, just use the zone
-                    : $event->name . '.' . $event->zone;
-
-                Log::debug('Creating PowerDNS SPF record', [
-                    'zone' => $event->zone,
-                    'name' => $recordName,
-                    'full_record_name' => $fullRecordName,
-                    'content' => $event->content,
-                    'type' => $event->type,
-                    'ttl' => $event->ttl ?? 3600,
-                ]);
-
-                $client = new \VEximweb\Plugin\PDNS\Clients\PowerDnsClient($dnsDomain->provider, $dnsDomain);
-
-                $result = $client->createRecord(
-                    $event->zone,
-                    $recordName,  // Pass empty string for root records
-                    $event->type,
-                    $event->content,
-                    $event->ttl ?? 3600
-                );
-
-                Log::info('PowerDNS SPF record created successfully', [
-                    'zone' => $event->zone,
-                    'name' => $recordName,
-                    'result' => $result,
-                ]);
-
-                // Send Filament notification
-                \Filament\Notifications\Notification::make()
-                    ->success()
-                    ->title('SPF DNS Record Generation Success')
-                    ->body('The generated SPF record was added to the DNS')
-                    ->persistent()
-                    ->send();
-
-                // Build the provider name and message
-                $providerName = $dnsDomain->provider->name ?? 'PowerDNS';
-                $message = "SPF record was added to {$providerName}";
-                $title = "SPF Record Added";
-
-                // Dispatch DnsRecordCreated event with explicit message
-                if (class_exists(\App\Events\DnsRecordCreated::class)) {
-                    try {
-                        Event::dispatch(new \App\Events\DnsRecordCreated(
-                            domain: $domain,
-                            recordType: $event->type,
-                            recordName: $fullRecordName,
-                            recordValue: $event->content,
-                            provider: $providerName,
-                            message: $message
-                        ));
-                    } catch (\Exception $e) {
-                        Log::warning('Failed to dispatch DnsRecordCreated event: ' . $e->getMessage());
-                    }
-                }
-
-                // Dispatch notification for UI
-                if (class_exists(\App\Notifications\DnsRecordCreatedNotification::class)) {
-                    try {
-                        // Create the event with explicit message
-                        $dnsEvent = new \App\Events\DnsRecordCreated(
-                            domain: $domain,
-                            recordType: $event->type,
-                            recordName: $fullRecordName,
-                            recordValue: $event->content,
-                            provider: $providerName,
-                            message: $message
-                        );
-                        
-                        // Create the notification with the event
-                        $notification = new \App\Notifications\DnsRecordCreatedNotification($dnsEvent);
-                        
-                        \Illuminate\Support\Facades\Notification::route('database', 1)->notify($notification);
-                        
-                        Log::debug('Notification sent successfully', [
-                            'message' => $message,
-                            'record_name' => $fullRecordName,
-                        ]);
-                    } catch (\Exception $e) {
-                        Log::warning('Failed to send notification: ' . $e->getMessage());
-                    }
-                }
-
-                return true;
-
-            } catch (\Exception $e) {
-                $error = $e->getMessage();
-                
-                Log::error('PowerDNS SPF creation failed', [
-                    'error' => $e->getMessage(),
-                    'code' => $e->getCode(),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
-                    'zone' => $event->zone,
-                    'name' => $event->name,
-                ]);
-                
-                // Send Filament error notification
-                \Filament\Notifications\Notification::make()
-                    ->danger()
-                    ->title('SPF Record Generation Failed')
-                    ->body($error)
-                    ->persistent()
-                    ->send();
-
-                // Dispatch the failure event for notification
-                if (class_exists(\App\Events\DnsRecordFailed::class) && $domain) {
-                    try {
-                        $recordName = empty($event->name) 
-                            ? $event->zone 
-                            : $event->name . '.' . $event->zone;
-                            
-                        Event::dispatch(new \App\Events\DnsRecordFailed(
-                            domain: $domain,
-                            recordType: $event->type,
-                            recordName: $recordName,
-                            errorMessage: 'PowerDNS: ' . $e->getMessage(),
-                            provider: $dnsDomain->provider->name ?? 'PowerDNS'
-                        ));
-                    } catch (\Exception $notifyError) {
-                        Log::warning('Failed to dispatch DnsRecordFailed event: ' . $notifyError->getMessage());
-                    }
-                }
-
-                // DO NOT re-throw - this prevents the generic Livewire error page
-                // Instead, flash the error to session for the UI to display
-                if ($domain) {
-                    session()->flash('error', 'SPF Record Failed: ' . $e->getMessage());
-                }
-
-                // Return false to indicate failure
-                return false;
-            }
-        }
-    );
-} 
-}
 }
