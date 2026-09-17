@@ -6,9 +6,10 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
+use Illuminate\Support\Facades\Log;
 use VEximweb\Plugin\DnsCore\Models\DnsDomain;
 use VEximweb\Plugin\DnsCore\Models\DnsProvider;
-use Illuminate\Support\Facades\Log;
 
 class DomainFormExtension
 {
@@ -41,6 +42,19 @@ class DomainFormExtension
                         ->live()
                         ->helperText('Leave blank to disable DNS management')
                         ->dehydrated(true)
+                        ->afterStateUpdated(function ($state, Set $set, $record) {
+                            if (blank($state)) {
+                                $set('pdns_is_active', false);
+
+                                return;
+                            }
+
+                            // A newly configured DNS provider should start active. Preserve
+                            // the saved active state when editing an existing DNS mapping.
+                            if (self::existingRow($record) === null) {
+                                $set('pdns_is_active', true);
+                            }
+                        })
                         ->afterStateHydrated(function ($component, $record) {
                             $row = self::existingRow($record);
                             if ($row) {
@@ -79,8 +93,9 @@ class DomainFormExtension
             Log::debug('No provider selected, deleting DNS domain record', [
                 'domain_id' => $record->domain_id,
             ]);
-            
+
             DnsDomain::where('domain_id', $record->domain_id)->delete();
+
             return;
         }
 
