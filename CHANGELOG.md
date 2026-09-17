@@ -2,6 +2,16 @@
 
 All notable changes to `vexim-pdns` will be documented in this file.
 
+## v1.2.0 - 2026-09-17
+
+### What's Changed
+
+* Bump zizmorcore/zizmor-action from 0.5.7 to 0.6.0 by @dependabot[bot] in https://github.com/MrSleeps/vexim-web-plugin-pdns/pull/14
+* Repair PowerDNS tests and CI by @MrSleeps in https://github.com/MrSleeps/vexim-web-plugin-pdns/pull/22
+* Land missing DNS activation and access-control changes by @MrSleeps in https://github.com/MrSleeps/vexim-web-plugin-pdns/pull/23
+
+**Full Changelog**: https://github.com/MrSleeps/vexim-web-plugin-pdns/compare/v1.1...v1.2.0
+
 ## v1.1 - 2026-07-13
 
 ### What's Changed
