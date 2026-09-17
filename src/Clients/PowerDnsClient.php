@@ -28,20 +28,13 @@ class PowerDnsClient implements DnsClient
         $this->provider = $provider;
         $this->domain = $domain;
         $this->baseUrl = rtrim($provider->api_url ?? '', '/');
-
-        // Decrypt the API key if it's encrypted
         $this->apiKey = $this->decryptApiKey($provider->api_key ?? '');
-
         $this->serverId = $provider->settings['server_id'] ?? 'localhost';
         $this->enabled = $provider->is_enabled && ! empty($this->baseUrl) && ! empty($this->apiKey);
     }
 
-    /**
-     * Decrypt API key if it's encrypted
-     */
     protected function decryptApiKey(string $apiKey): string
     {
-        // Check if the key looks like encrypted (Laravel encrypted strings start with 'eyJ')
         if (str_starts_with($apiKey, 'eyJ')) {
             try {
                 return Crypt::decryptString($apiKey);
@@ -56,13 +49,9 @@ class PowerDnsClient implements DnsClient
             }
         }
 
-        // Return as-is if not encrypted (for backward compatibility)
         return $apiKey;
     }
 
-    /**
-     * Normalize zone name by adding trailing dot (RFC format)
-     */
     protected function normalizeZone(string $zone): string
     {
         $zone = trim($zone);
@@ -70,48 +59,70 @@ class PowerDnsClient implements DnsClient
         return rtrim($zone, '.') . '.';
     }
 
-    /**
-     * Normalize record name by adding trailing dot if needed
-     */
-protected function normalizeName(string $name, string $zone): string
-{
-    $name = trim($name);
-    $zone = rtrim($zone, '.');
-    
-    // If name is empty, this is a root/apex record
-    // Return just the zone with trailing dot
-    if (empty($name)) {
-        return $zone . '.';
-    }
-    
-    // If it's a fully qualified domain name (ends with the zone name)
-    if (str_ends_with($name, $zone)) {
-        return rtrim($name, '.') . '.';
-    }
-    
-    // If it doesn't have a dot at all, append zone
-    if (! str_contains($name, '.')) {
-        return $name . '.' . $zone . '.';
-    }
-    
-    // Otherwise, just add trailing dot if missing
-    return rtrim($name, '.') . '.';
-}
+    protected function effectiveZone(string $zone): string
+    {
+        if (! $this->domain) {
+            return rtrim($zone, '.');
+        }
 
-    /**
-     * Format content based on record type
-     */
+        if (method_exists($this->domain, 'authoritativeZoneName')) {
+            return $this->domain->authoritativeZoneName();
+        }
+
+        return rtrim((string) ($this->domain->zone_id ?: $zone), '.');
+    }
+
+    protected function qualifyRecordName(string $name): string
+    {
+        if (! $this->domain) {
+            return $name;
+        }
+
+        $domainName = rtrim($this->domain->domain_name, '.');
+        $name = rtrim(trim($name), '.');
+
+        if ($name === '' || $name === '@') {
+            return $domainName;
+        }
+
+        $normalizedName = strtolower($name);
+        $normalizedDomain = strtolower($domainName);
+
+        if ($normalizedName === $normalizedDomain || str_ends_with($normalizedName, '.' . $normalizedDomain)) {
+            return $name;
+        }
+
+        return $name . '.' . $domainName;
+    }
+
+    protected function normalizeName(string $name, string $zone): string
+    {
+        $name = rtrim(trim($name), '.');
+        $zone = rtrim($zone, '.');
+
+        if ($name === '') {
+            return $zone . '.';
+        }
+
+        if ($name === $zone || str_ends_with($name, '.' . $zone)) {
+            return $name . '.';
+        }
+
+        if (! str_contains($name, '.')) {
+            return $name . '.' . $zone . '.';
+        }
+
+        return $name . '.';
+    }
+
     protected function formatContent(string $type, string $content, ?int $priority = null): string
     {
-        // For TXT records, ensure content is quoted
         if ($type === 'TXT') {
-            // Remove existing quotes if any
             $content = trim($content, '"');
 
             return '"' . $content . '"';
         }
 
-        // For MX and SRV records, add priority
         if ($priority !== null && in_array($type, ['MX', 'SRV'])) {
             return "{$priority} {$content}";
         }
@@ -139,7 +150,6 @@ protected function normalizeName(string $name, string $zone): string
             throw new \Exception('Invalid PowerDNS API key');
         }
 
-        // 204 No Content is successful
         if ($response->status() === 204) {
             return true;
         }
@@ -167,7 +177,6 @@ protected function normalizeName(string $name, string $zone): string
     {
         $normalizedZone = $this->normalizeZone($zone);
 
-        // Normalize nameservers with trailing dots
         $nameservers = $options['nameservers'] ?? ['ns1.example.com.', 'ns2.example.com.'];
         $nameservers = array_map(function ($ns) {
             return rtrim($ns, '.') . '.';
@@ -179,12 +188,10 @@ protected function normalizeName(string $name, string $zone): string
             'nameservers' => $nameservers,
         ];
 
-        // Add optional SOA-EDIT if provided
         if (isset($options['soa_edit'])) {
             $data['soa_edit'] = $options['soa_edit'];
         }
 
-        // Add master IPs for slave zones
         if (isset($options['masters'])) {
             $data['masters'] = $options['masters'];
         }
@@ -206,7 +213,6 @@ protected function normalizeName(string $name, string $zone): string
     {
         $zones = $this->request('get', '/zones');
 
-        // Transform to a simpler format if needed
         return array_map(function ($zone) {
             return [
                 'id' => $zone['id'],
@@ -226,7 +232,6 @@ protected function normalizeName(string $name, string $zone): string
         $records = [];
         foreach ($zoneData['rrsets'] ?? [] as $rrset) {
             foreach ($rrset['records'] ?? [] as $record) {
-                // Clean content (remove quotes for display)
                 $content = $record['content'];
                 if ($rrset['type'] === 'TXT') {
                     $content = trim($content, '"');
@@ -234,7 +239,7 @@ protected function normalizeName(string $name, string $zone): string
 
                 $records[] = [
                     'id' => md5($rrset['name'] . $rrset['type'] . $record['content']),
-                    'name' => rtrim($rrset['name'], '.'), // Remove trailing dot for display
+                    'name' => rtrim($rrset['name'], '.'),
                     'type' => $rrset['type'],
                     'content' => $content,
                     'ttl' => $rrset['ttl'] ?? 3600,
@@ -249,11 +254,9 @@ protected function normalizeName(string $name, string $zone): string
 
     protected function extractPriority(string $type, string $content): ?int
     {
-        // For MX and SRV records, priority is part of the content
         if (in_array($type, ['MX', 'SRV'])) {
             $parts = explode(' ', $content);
 
-            // $parts[0] always exists, just check if it's numeric
             return is_numeric($parts[0]) ? (int) $parts[0] : null;
         }
 
@@ -262,6 +265,9 @@ protected function normalizeName(string $name, string $zone): string
 
     public function createRecord(string $zone, string $name, string $type, string $content, int $ttl = 3600, ?int $priority = null): bool
     {
+        $zone = $this->effectiveZone($zone);
+        $name = $this->qualifyRecordName($name);
+
         $normalizedZone = $this->normalizeZone($zone);
         $normalizedName = $this->normalizeName($name, $zone);
         $formattedContent = $this->formatContent($type, $content, $priority);
@@ -290,7 +296,7 @@ protected function normalizeName(string $name, string $zone): string
 
     public function deleteRecord(string $zone, string $recordId): bool
     {
-        // Get the record details first
+        $zone = $this->effectiveZone($zone);
         $records = $this->getRecords($zone);
         $record = collect($records)->firstWhere('id', $recordId);
 
@@ -320,7 +326,6 @@ protected function normalizeName(string $name, string $zone): string
     public function testConnection(): bool
     {
         try {
-            // Try to get servers list as a connection test
             $url = $this->baseUrl . '/api/v1/servers';
 
             $response = Http::timeout(10)
@@ -349,9 +354,6 @@ protected function normalizeName(string $name, string $zone): string
         return $this->enabled;
     }
 
-    /**
-     * Additional helper method to get zone details
-     */
     public function getZone(string $zone): ?array
     {
         try {
@@ -365,11 +367,9 @@ protected function normalizeName(string $name, string $zone): string
         }
     }
 
-    /**
-     * Update an existing record
-     */
     public function updateRecord(string $zone, string $recordId, array $updates): bool
     {
+        $zone = $this->effectiveZone($zone);
         $records = $this->getRecords($zone);
         $record = collect($records)->firstWhere('id', $recordId);
 
@@ -377,10 +377,8 @@ protected function normalizeName(string $name, string $zone): string
             return false;
         }
 
-        // Delete the old record first
         $this->deleteRecord($zone, $recordId);
 
-        // Create the updated record
         return $this->createRecord(
             $zone,
             $updates['name'] ?? $record['name'],
