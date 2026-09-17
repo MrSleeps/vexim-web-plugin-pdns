@@ -4,9 +4,8 @@ namespace VEximweb\Plugin\PDNS\Filament;
 
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
-use VEximweb\Plugin\DnsCore\Models\DnsDomain;
-use VEximweb\Plugin\DnsTools\Models\SystemDomains as Domain;
 use Illuminate\Support\Facades\Log;
+use VEximweb\Plugin\DnsCore\Models\DnsDomain;
 
 class SpfFormExtension
 {
@@ -25,8 +24,9 @@ class SpfFormExtension
                         ->label('Update DNS')
                         ->default(false)
                         ->afterStateHydrated(function ($component, $state) use ($domainRecord) {
-                            if (!$domainRecord) {
+                            if (! $domainRecord) {
                                 Log::debug('No domain record, state remains false');
+
                                 return;
                             }
 
@@ -39,7 +39,6 @@ class SpfFormExtension
                                 'new_state' => $exists,
                             ]);
 
-                            // This should force the toggle to the correct state
                             $component->state($exists);
                         }),
                 ])
@@ -50,21 +49,20 @@ class SpfFormExtension
     public static function onSave(mixed $record, array $data): void
     {
         Log::debug('SpfFormExtension::onSave called', [
-            'domain_id' => $record?->id ?? $record?->domain_id ?? null,
-            'domain' => $record?->domain ?? null,
+            'domain_id' => $record->id ?? $record->domain_id ?? null,
+            'domain' => $record->domain ?? null,
             'update_dns' => $data['update_dns'] ?? null,
             'pdns_provider_id' => $data['pdns_provider_id'] ?? null,
         ]);
 
-        // If you want to actually save/delete the DNS domain record
         if ($record && isset($data['update_dns'])) {
             $domainId = $record->id ?? $record->domain_id ?? null;
-            
-            if (!$domainId) {
+
+            if (! $domainId) {
                 Log::warning('No domain ID found for DNS save');
+
                 return;
             }
-
         }
     }
 }

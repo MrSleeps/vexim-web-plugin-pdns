@@ -2,8 +2,11 @@ name: fix-code-style
 
 on:
   push:
+    branches-ignore:
+      - main
     paths:
       - '**.php'
+      - '.github/workflows/fix-code-style.yml'
 
 permissions:
   contents: write
@@ -11,32 +14,51 @@ permissions:
 jobs:
   fix-code-style:
     runs-on: ubuntu-latest
-    steps:
-      # persist-credentials: true is required so `git-auto-commit-action` below
-      # can push the reformatted files back to the branch.
-      - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6.0.3 # zizmor: ignore[artipacked]
 
-      - name: Cache Composer dependencies
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          path: ~/.composer/cache/files
-          key: composer-cs-${{ hashFiles('composer.json') }}
-          restore-keys: |
-            composer-cs-
+          fetch-depth: 0
 
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
-          php-version: 8.4
+          php-version: '8.4'
+          coverage: none
 
-      - name: Install dependencies
-        run: composer install --no-interaction --no-scripts
+      - name: Install supported dependencies
+        run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress --no-scripts
 
-      - name: Run Pint
-        run: ./vendor/bin/pint
+      - name: Restore repository lock file
+        run: git restore composer.lock
+
+      - name: Find changed PHP files
+        id: changed-php
+        shell: bash
+        run: |
+          git fetch origin main:refs/remotes/origin/main --no-tags
+
+          mapfile -d '' files < <(
+            git diff --name-only --diff-filter=ACMRT -z origin/main...HEAD -- '*.php'
+          )
+
+          if (( ${#files[@]} == 0 )); then
+            echo "has_files=false" >> "$GITHUB_OUTPUT"
+            echo "No changed PHP files to format."
+            exit 0
+          fi
+
+          printf '%s\0' "${files[@]}" > /tmp/pint-files
+          printf 'Changed PHP files:\n%s\n' "${files[@]}"
+          echo "has_files=true" >> "$GITHUB_OUTPUT"
+
+      - name: Fix PHP code style issues
+        if: steps.changed-php.outputs.has_files == 'true'
+        run: xargs -0 -r ./vendor/bin/pint < /tmp/pint-files
 
       - name: Commit changes
+        if: steps.changed-php.outputs.has_files == 'true'
         uses: stefanzweifel/git-auto-commit-action@4a55954c782fc1ea30b9056cd3e7a2b40ca8887d # v7.2.0
         with:
           commit_message: Fix styling
