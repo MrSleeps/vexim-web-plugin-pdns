@@ -23,6 +23,10 @@ class SpfFormExtension
                     Toggle::make('update_dns')
                         ->label('Update DNS')
                         ->default(false)
+                        ->disabled(fn () => ! DnsRecordFormAccess::canUpdate($domainRecord))
+                        ->helperText(fn () => DnsRecordFormAccess::canUpdate($domainRecord)
+                            ? 'Update the DNS record in the configured provider.'
+                            : 'DNS record changes for this domain are controlled by the system administrator.')
                         ->afterStateHydrated(function ($component, $state) use ($domainRecord) {
                             if (! $domainRecord) {
                                 Log::debug('No domain record, state remains false');
@@ -39,7 +43,7 @@ class SpfFormExtension
                                 'new_state' => $exists,
                             ]);
 
-                            $component->state($exists);
+                            $component->state($exists && DnsRecordFormAccess::canUpdate($domainRecord));
                         }),
                 ])
                 ->columns(2),
