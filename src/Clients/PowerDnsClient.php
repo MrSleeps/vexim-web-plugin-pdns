@@ -42,7 +42,7 @@ class PowerDnsClient implements DnsClient
                 try {
                     return Crypt::decrypt($apiKey);
                 } catch (\Exception $e) {
-                    Log::error('Failed to decrypt API key: '.$e->getMessage());
+                    Log::error('Failed to decrypt API key: ' . $e->getMessage());
 
                     return '';
                 }
@@ -56,7 +56,7 @@ class PowerDnsClient implements DnsClient
     {
         $zone = trim($zone);
 
-        return rtrim($zone, '.').'.';
+        return rtrim($zone, '.') . '.';
     }
 
     protected function effectiveZone(string $zone): string
@@ -88,11 +88,11 @@ class PowerDnsClient implements DnsClient
         $normalizedName = strtolower($name);
         $normalizedDomain = strtolower($domainName);
 
-        if ($normalizedName === $normalizedDomain || str_ends_with($normalizedName, '.'.$normalizedDomain)) {
+        if ($normalizedName === $normalizedDomain || str_ends_with($normalizedName, '.' . $normalizedDomain)) {
             return $name;
         }
 
-        return $name.'.'.$domainName;
+        return $name . '.' . $domainName;
     }
 
     protected function normalizeName(string $name, string $zone): string
@@ -101,18 +101,18 @@ class PowerDnsClient implements DnsClient
         $zone = rtrim($zone, '.');
 
         if ($name === '') {
-            return $zone.'.';
+            return $zone . '.';
         }
 
-        if ($name === $zone || str_ends_with($name, '.'.$zone)) {
-            return $name.'.';
+        if ($name === $zone || str_ends_with($name, '.' . $zone)) {
+            return $name . '.';
         }
 
         if (! str_contains($name, '.')) {
-            return $name.'.'.$zone.'.';
+            return $name . '.' . $zone . '.';
         }
 
-        return $name.'.';
+        return $name . '.';
     }
 
     protected function formatContent(string $type, string $content, ?int $priority = null): string
@@ -120,7 +120,7 @@ class PowerDnsClient implements DnsClient
         if ($type === 'TXT') {
             $content = trim($content, '"');
 
-            return '"'.$content.'"';
+            return '"' . $content . '"';
         }
 
         if ($priority !== null && in_array($type, ['MX', 'SRV'])) {
@@ -136,7 +136,7 @@ class PowerDnsClient implements DnsClient
             throw new \Exception('PowerDNS client is not enabled or configured');
         }
 
-        $url = $this->baseUrl.'/api/v1/servers/'.$this->serverId.$endpoint;
+        $url = $this->baseUrl . '/api/v1/servers/' . $this->serverId . $endpoint;
 
         $response = Http::timeout(30)
             ->withHeaders([
@@ -155,7 +155,7 @@ class PowerDnsClient implements DnsClient
         }
 
         if (! $response->successful()) {
-            throw new \Exception('PowerDNS API error: '.$response->body());
+            throw new \Exception('PowerDNS API error: ' . $response->body());
         }
 
         return $response->json();
@@ -179,7 +179,7 @@ class PowerDnsClient implements DnsClient
 
         $nameservers = $options['nameservers'] ?? ['ns1.example.com.', 'ns2.example.com.'];
         $nameservers = array_map(function ($ns) {
-            return rtrim($ns, '.').'.';
+            return rtrim($ns, '.') . '.';
         }, $nameservers);
 
         $data = [
@@ -238,7 +238,7 @@ class PowerDnsClient implements DnsClient
                 }
 
                 $records[] = [
-                    'id' => md5($rrset['name'].$rrset['type'].$record['content']),
+                    'id' => md5($rrset['name'] . $rrset['type'] . $record['content']),
                     'name' => rtrim($rrset['name'], '.'),
                     'type' => $rrset['type'],
                     'content' => $content,
@@ -326,7 +326,7 @@ class PowerDnsClient implements DnsClient
     public function testConnection(): bool
     {
         try {
-            $url = $this->baseUrl.'/api/v1/servers';
+            $url = $this->baseUrl . '/api/v1/servers';
 
             $response = Http::timeout(10)
                 ->withHeaders([
@@ -343,7 +343,7 @@ class PowerDnsClient implements DnsClient
 
             return $response->successful();
         } catch (\Exception $e) {
-            Log::error('PowerDNS connection test failed: '.$e->getMessage());
+            Log::error('PowerDNS connection test failed: ' . $e->getMessage());
 
             return false;
         }
@@ -361,7 +361,7 @@ class PowerDnsClient implements DnsClient
 
             return $this->request('get', "/zones/{$normalizedZone}");
         } catch (\Exception $e) {
-            Log::error('Failed to get zone: '.$e->getMessage());
+            Log::error('Failed to get zone: ' . $e->getMessage());
 
             return null;
         }
