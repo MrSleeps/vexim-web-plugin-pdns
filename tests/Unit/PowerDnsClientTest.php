@@ -2,6 +2,8 @@
 
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use VEximweb\Core\Data\Models\Domain;
+use VEximweb\Plugin\DnsCore\Models\DnsDomain;
 use VEximweb\Plugin\DnsCore\Models\DnsProvider;
 use VEximweb\Plugin\PDNS\Clients\PowerDnsClient;
 
@@ -17,6 +19,19 @@ function makePowerDnsClientProvider(array $overrides = []): DnsProvider
         'is_enabled' => true,
         'priority' => 0,
     ], $overrides));
+}
+
+function makeMappedPowerDnsDomain(string $domainName, string $zoneName): DnsDomain
+{
+    $owner = new Domain;
+    $owner->setAttribute('domain', $domainName);
+
+    $domain = new DnsDomain([
+        'zone_id' => $zoneName,
+    ]);
+    $domain->setRelation('ownerDomain', $owner);
+
+    return $domain;
 }
 
 it('checks zone existence using the normalized PowerDNS URL and API key', function () {
@@ -64,16 +79,19 @@ it('writes normalized MX records with priority and TTL', function () {
     });
 });
 
-it('writes a fully qualified child-domain record into its authoritative parent zone', function () {
+it('routes a child-domain record through its mapped authoritative parent zone', function () {
     Http::fake([
         '*' => Http::response(null, 204),
     ]);
 
-    $client = new PowerDnsClient(makePowerDnsClientProvider());
+    $client = new PowerDnsClient(
+        makePowerDnsClientProvider(),
+        makeMappedPowerDnsDomain('mail.example.com', 'example.com'),
+    );
 
     expect($client->createRecord(
-        'example.com',
-        '_dmarc.mail.example.com',
+        'mail.example.com',
+        '_dmarc',
         'TXT',
         'v=DMARC1; p=none',
     ))->toBeTrue();
