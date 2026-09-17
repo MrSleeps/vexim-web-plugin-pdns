@@ -2,6 +2,14 @@
 
 All notable changes to `vexim-pdns` will be documented in this file.
 
+## v1.2.1 - 2026-09-17
+
+### What's Changed
+
+* Respect authoritative parent zones for child-domain records by @MrSleeps in https://github.com/MrSleeps/vexim-web-plugin-pdns/pull/24
+
+**Full Changelog**: https://github.com/MrSleeps/vexim-web-plugin-pdns/compare/v1.2.0...v1.2.1
+
 ## v1.2.0 - 2026-09-17
 
 ### What's Changed
