@@ -64,6 +64,31 @@ it('writes normalized MX records with priority and TTL', function () {
     });
 });
 
+it('writes a fully qualified child-domain record into its authoritative parent zone', function () {
+    Http::fake([
+        '*' => Http::response(null, 204),
+    ]);
+
+    $client = new PowerDnsClient(makePowerDnsClientProvider());
+
+    expect($client->createRecord(
+        'example.com',
+        '_dmarc.mail.example.com',
+        'TXT',
+        'v=DMARC1; p=none',
+    ))->toBeTrue();
+
+    Http::assertSent(function (Request $request) {
+        $data = $request->data();
+
+        return $request->method() === 'PATCH'
+            && $request->url() === 'https://pdns.test/api/v1/servers/test-server/zones/example.com.'
+            && data_get($data, 'rrsets.0.name') === '_dmarc.mail.example.com.'
+            && data_get($data, 'rrsets.0.type') === 'TXT'
+            && data_get($data, 'rrsets.0.records.0.content') === '"v=DMARC1; p=none"';
+    });
+});
+
 it('parses TXT and MX records returned by PowerDNS', function () {
     Http::fake([
         'https://pdns.test/api/v1/servers/test-server/zones/example.com.' => Http::response([
