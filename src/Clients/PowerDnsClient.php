@@ -65,7 +65,11 @@ class PowerDnsClient implements DnsClient
             return rtrim($zone, '.');
         }
 
-        return $this->domain->authoritativeZoneName();
+        if (method_exists($this->domain, 'authoritativeZoneName')) {
+            return $this->domain->authoritativeZoneName();
+        }
+
+        return rtrim((string) ($this->domain->zone_id ?: $zone), '.');
     }
 
     protected function qualifyRecordName(string $name): string
